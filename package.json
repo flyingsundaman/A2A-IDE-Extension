@@ -1,26 +1,23 @@
 {
   "name": "antigravity-a2a-mesh",
-  "displayName": "Antigravity A2A Mesh (Paperclip & Obsidian)",
-  "description": "Local Agent-to-Agent Mesh orchestrating Claude Code, OpenAI Codex, and Antigravity Multi-Account with Obsidian Vault ADR sync.",
-  "version": "1.0.0",
+  "displayName": "A2A Workspace",
+  "description": "Configure agents, connect providers and MCP tools, manage knowledge, and track multi-agent work.",
+  "version": "2.0.0",
   "publisher": "local-mesh",
-  "icon": "resources/icon.svg",
   "engines": {
     "vscode": "^1.85.0"
   },
   "main": "./src/extension.js",
   "activationEvents": [
-    "*",
-    "onStartupFinished",
     "onView:a2a.squadView"
   ],
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "panel": [
         {
           "id": "a2a-sidebar",
-          "title": "A2A Mesh",
-          "icon": "resources/icon.svg"
+          "title": "A2A",
+          "icon": "resources/wordmark.svg"
         }
       ]
     },
@@ -29,46 +26,45 @@
         {
           "type": "webview",
           "id": "a2a.squadView",
-          "name": "Paperclip Agent Squad"
+          "name": "A2A Workspace"
         }
       ]
     },
     "commands": [
       {
         "command": "a2a.openSquad",
-        "title": "Open Squad Group Chat",
-        "category": "A2A Mesh",
-        "icon": "$(comment-discussion)"
+        "title": "Open Workspace",
+        "category": "A2A"
       },
       {
         "command": "a2a.askClaude",
-        "title": "Consult Claude Architect (Selection)",
-        "category": "A2A Mesh",
-        "icon": "$(lightbulb)"
+        "title": "Consult Agent with Selection",
+        "category": "A2A"
       },
       {
         "command": "a2a.auditCodex",
-        "title": "Security Audit with Codex (Selection)",
-        "category": "A2A Mesh",
-        "icon": "$(shield)"
+        "title": "Review Selection",
+        "category": "A2A"
       },
       {
         "command": "a2a.runCouncil",
-        "title": "Run Multi-Agent Council Debate",
-        "category": "A2A Mesh",
-        "icon": "$(organization)"
+        "title": "Open Tasks",
+        "category": "A2A"
       },
       {
         "command": "a2a.syncObsidian",
-        "title": "Sync Last Task to Obsidian Vault ADR",
-        "category": "A2A Mesh",
-        "icon": "$(book)"
+        "title": "Open Knowledge & Skills",
+        "category": "A2A"
       },
       {
         "command": "a2a.refreshQuotas",
-        "title": "Refresh Peer Account Quotas",
-        "category": "A2A Mesh",
-        "icon": "$(refresh)"
+        "title": "Test Connections",
+        "category": "A2A"
+      },
+      {
+        "command": "a2a.openAgents",
+        "title": "Open Agents & Connections",
+        "category": "A2A"
       }
     ],
     "menus": {
@@ -87,48 +83,53 @@
         }
       ],
       "commandPalette": [
-        { "command": "a2a.openSquad" },
-        { "command": "a2a.askClaude" },
-        { "command": "a2a.auditCodex" },
-        { "command": "a2a.runCouncil" },
-        { "command": "a2a.syncObsidian" },
-        { "command": "a2a.refreshQuotas" }
+        {
+          "command": "a2a.openSquad"
+        },
+        {
+          "command": "a2a.askClaude"
+        },
+        {
+          "command": "a2a.auditCodex"
+        },
+        {
+          "command": "a2a.runCouncil"
+        },
+        {
+          "command": "a2a.syncObsidian"
+        },
+        {
+          "command": "a2a.refreshQuotas"
+        }
       ]
     },
     "configuration": {
-      "title": "A2A Mesh Settings",
-      "properties": {
-        "a2a.obsidianVaultPath": {
-          "type": "string",
-          "default": "",
-          "description": "Absolute path to your local Obsidian Vault (e.g. D:/MyVault)."
-        },
-        "a2a.autoSyncObsidian": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically export Architectural Decision Records (ADRs) to Obsidian on task completion."
-        },
-        "a2a.claudeCliPath": {
-          "type": "string",
-          "default": "C:\\Users\\acer\\.local\\bin\\claude.exe",
-          "description": "Path to the local Claude Code executable."
-        },
-        "a2a.codexCliPath": {
-          "type": "string",
-          "default": "C:\\Users\\acer\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009\\codex.exe",
-          "description": "Path to the local OpenAI Codex executable."
-        },
-        "a2a.agyAccountPreference": {
-          "type": "string",
-          "enum": [
-            "auto_highest_quota",
-            "pro_only",
-            "first_available"
-          ],
-          "default": "auto_highest_quota",
-          "description": "Strategy for selecting secondary Antigravity peer accounts."
-        }
-      }
+      "title": "A2A",
+      "properties": {}
     }
-  }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "check": "node scripts/check.cjs",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "test:ui": "node test/ui.cjs"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Configuration can be viewed. Agent execution, connection checks and connector processes require workspace trust."
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.0.0",
+    "playwright": "1.62.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/flyingsundaman/A2A-IDE-Extension.git"
+  },
+  "license": "UNLICENSED"
 }

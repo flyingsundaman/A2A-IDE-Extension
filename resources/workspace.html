@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src {{CSP}}; script-src 'nonce-{{NONCE}}';"
+    />
+    <link rel="stylesheet" href="{{CSS}}" />
+    <title>A2A Workspace</title>
+  </head>
+  <body data-page="{{PAGE}}">
+    <header>
+      <div><strong>A2A</strong><span class="muted"> Workspace</span></div>
+      <button id="open-full" class="quiet">Open in editor</button>
+    </header>
+    <nav aria-label="Main navigation">
+      <button data-page="agents">Agents & Connections</button
+      ><button data-page="knowledge">Knowledge & Skills</button
+      ><button data-page="chat">Chat</button
+      ><button data-page="tasks">Tasks <span id="task-count"></span></button>
+    </nav>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <div id="trust" class="banner" hidden>
+      Workspace is in restricted mode. Trust the workspace to run agents and
+      connectors.
+    </div>
+    <main>
+      <section id="agents" class="page" aria-label="Agents and connections">
+        <div class="heading">
+          <div>
+            <p class="eyebrow">01 / SETUP</p>
+            <h1>Agents & Connections</h1>
+            <p>
+              Connect once. Create agents with different roles, models and
+              tools.
+            </p>
+          </div>
+          <button id="detect">Use local login</button>
+        </div>
+        <div class="section-heading">
+          <h2>Connections</h2>
+          <span class="muted">Accounts and provider access</span>
+        </div>
+        <div id="connection-list"></div>
+        <details id="connection-editor">
+          <summary>Add connection</summary>
+          <form id="connection-form">
+            <input type="hidden" name="id" />
+            <div class="form-grid">
+              <label
+                >Name<input
+                  name="name"
+                  required
+                  maxlength="200"
+                  placeholder="Personal Codex" /></label
+              ><label
+                >Provider<select name="provider">
+                  <option value="codex">Codex — local account</option>
+                  <option value="claude">Claude Code — local account</option>
+                  <option value="openai">OpenAI — API</option>
+                  <option value="anthropic">Anthropic — API</option>
+                  <option value="gemini">Gemini — API</option>
+                  <option value="compatible">
+                    OpenAI-compatible / local model
+                  </option>
+                  <option value="custom">Antigravity / custom CLI</option>
+                </select></label
+              >
+            </div>
+            <p id="provider-help" class="hint"></p>
+            <div data-api>
+              <label
+                >API base URL<input
+                  name="endpoint"
+                  placeholder="Provider default, or your gateway"
+              /></label>
+              <p class="hint">
+                HTTPS required, except localhost. Keys are entered separately in
+                the IDE secure prompt.
+              </p>
+            </div>
+            <div data-cli>
+              <label
+                >Executable<input
+                  name="executable"
+                  placeholder="codex, claude, or an absolute path" /></label
+              ><label data-custom
+                >Arguments (JSON array)<textarea name="args" rows="2">
+["{prompt}"]</textarea
+                >
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary">Save connection</button
+              ><button type="reset">Reset</button>
+            </div>
+          </form>
+        </details>
+        <div class="section-heading">
+          <h2>Agents</h2>
+          <span class="muted">Identity, role and permissions</span>
+        </div>
+        <div id="agent-list"></div>
+        <details id="agent-editor">
+          <summary>Add agent</summary>
+          <form id="agent-form">
+            <input type="hidden" name="id" />
+            <div class="form-grid">
+              <label
+                >Name<input
+                  name="name"
+                  required
+                  placeholder="Implementation reviewer" /></label
+              ><label
+                >Connection<select name="connectionId" required></select></label
+              ><label
+                >Role<input
+                  name="role"
+                  list="roles"
+                  required
+                  value="Assistant"
+                /><datalist id="roles">
+                  <option>Assistant</option>
+                  <option>Planner</option>
+                  <option>Implementer</option>
+                  <option>Reviewer</option>
+                  <option>Researcher</option>
+                </datalist></label
+              ><label
+                >Model<input
+                  name="model"
+                  list="models"
+                  placeholder="Default for CLI; required for API" /><datalist
+                  id="models"
+                ></datalist
+              ></label>
+            </div>
+            <label
+              >Instructions<textarea
+                name="instructions"
+                rows="4"
+                placeholder="Describe this agent’s responsibilities and expected output."
+              ></textarea></label
+            ><label class="check"
+              ><input name="allowEdits" type="checkbox" />Allow workspace edits
+              (approval required before execution)</label
+            >
+            <p class="hint">
+              API agents can read workspace files and request approved writes.
+              Codex and Claude use restricted CLI tools. Custom CLIs enforce
+              their own permissions; only configure executables you trust.
+            </p>
+            <fieldset>
+              <legend>Available skills</legend>
+              <div id="agent-skills" class="checks"></div>
+            </fieldset>
+            <fieldset>
+              <legend>Allowed connectors (API agents)</legend>
+              <div id="agent-connectors" class="checks"></div>
+            </fieldset>
+            <div class="actions">
+              <button type="submit" class="primary">Save agent</button
+              ><button type="reset">Reset</button>
+            </div>
+          </form>
+        </details>
+        <div class="section-heading">
+          <h2>Connectors</h2>
+          <span class="muted">MCP tools and service context</span>
+        </div>
+        <div id="connector-list"></div>
+        <details id="connector-editor">
+          <summary>Add connector</summary>
+          <form id="connector-form">
+            <input type="hidden" name="id" />
+            <div class="form-grid">
+              <label
+                >Name<input
+                  name="name"
+                  required
+                  placeholder="Project tools" /></label
+              ><label
+                >Connection type<select name="transport">
+                  <option value="stdio">MCP — stdio</option>
+                  <option value="http">MCP — Streamable HTTP</option>
+                  <option value="service">Service — read-only HTTP GET</option>
+                </select></label
+              >
+            </div>
+            <div data-stdio>
+              <label
+                >Executable<input name="executable" placeholder="node" /></label
+              ><label
+                >Arguments (JSON array)<textarea
+                  name="args"
+                  rows="2"
+                  placeholder='["/path/to/server.js"]'
+                ></textarea></label
+              ><label
+                >Credential environment variable (optional)<input
+                  name="secretEnv"
+                  placeholder="SERVICE_API_KEY"
+              /></label>
+            </div>
+            <div data-http>
+              <label
+                >Endpoint<input
+                  name="endpoint"
+                  placeholder="https://service.example/mcp"
+              /></label>
+            </div>
+            <p class="hint">
+              Credentials use secure storage. HTTP sends a Bearer token. MCP
+              programs run on this machine; keep secrets out of arguments. Tools
+              require approval when called.
+            </p>
+            <div class="actions">
+              <button type="submit" class="primary">Save connector</button
+              ><button type="reset">Reset</button>
+            </div>
+          </form>
+        </details>
+      </section>
+      <section
+        id="knowledge"
+        class="page"
+        hidden
+        aria-label="Knowledge and skills"
+      >
+        <div class="heading">
+          <div>
+            <p class="eyebrow">02 / CONTEXT</p>
+            <h1>Knowledge & Skills</h1>
+            <p>Select the notes and procedures they should use.</p>
+          </div>
+        </div>
+        <div class="section-heading">
+          <h2>Obsidian vault</h2>
+          <button id="pick-vault">Choose vault</button>
+        </div>
+        <p id="vault-path" class="mono muted"></p>
+        <p id="vault-error" class="error"></p>
+        <form id="knowledge-form">
+          <fieldset>
+            <legend>Notes included in requests</legend>
+            <div id="notes" class="checks scroll"></div>
+          </fieldset>
+          <label class="check"
+            ><input name="autoExport" type="checkbox" />Export task records to
+            the vault’s ADR folder automatically</label
+          >
+          <p class="hint">
+            Only selected notes are included. Maximum 50 KB per note and 100,000
+            characters of combined context. Exports retain the actual task
+            status.
+          </p>
+          <div class="actions">
+            <button type="submit" class="primary">Save context</button
+            ><button type="button" id="disconnect-vault">
+              Disconnect vault
+            </button>
+          </div>
+        </form>
+        <div class="section-heading">
+          <h2>Skills</h2>
+          <button id="import-skill">Import Markdown</button>
+        </div>
+        <p class="hint">
+          Skills provide instructions. Assign them to agents on the Agents page.
+          Import copies the file; edits to the original are not synced.
+        </p>
+        <div id="skill-list"></div>
+        <details id="skill-editor">
+          <summary>Add skill</summary>
+          <form id="skill-form">
+            <input type="hidden" name="id" /><label
+              >Name<input
+                name="name"
+                required
+                placeholder="Review guidelines" /></label
+            ><label
+              >Instructions<textarea
+                name="instructions"
+                rows="10"
+                required
+                maxlength="30000"
+              ></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" class="primary">Save skill</button
+              ><button type="reset">Reset</button>
+            </div>
+          </form>
+        </details>
+      </section>
+      <section id="chat" class="page" hidden aria-label="Chat">
+        <div class="heading">
+          <div>
+            <p class="eyebrow">03 / CONVERSATION</p>
+            <h1>Chat</h1>
+            <p>Ask one agent, then turn the request into a tracked workflow.</p>
+          </div>
+          <button id="clear-chat" class="quiet">Clear history</button>
+        </div>
+        <div id="active-task" class="banner" hidden></div>
+        <label>Agent<select id="chat-agent"></select></label>
+        <p id="chat-context" class="hint"></p>
+        <div id="messages" role="log" aria-label="Conversation"></div>
+        <form id="chat-form" class="composer">
+          <label for="prompt">Message</label
+          ><textarea
+            id="prompt"
+            rows="4"
+            placeholder="Describe your request. Ctrl/Cmd + Enter to send."
+            required
+            maxlength="50000"
+          ></textarea>
+          <div class="actions">
+            <button type="submit" class="primary" id="send">Send message</button
+            ><button type="button" id="to-task">
+              Create task from message
+            </button>
+          </div>
+          <p class="hint">
+            Requests run on the machine hosting this extension. API agents use
+            approved workspace tools; CLI agents use their own supported
+            execution tools.
+          </p>
+        </form>
+      </section>
+      <section id="tasks" class="page" hidden aria-label="Tasks">
+        <div class="heading">
+          <div>
+            <p class="eyebrow">04 / EXECUTION</p>
+            <h1>Tasks</h1>
+            <p>Inspect each stage, its output and what needs your attention.</p>
+          </div>
+        </div>
+        <details id="task-editor" open>
+          <summary>New task</summary>
+          <form id="task-form">
+            <label
+              >Title<input
+                name="title"
+                required
+                placeholder="Implement authentication" /></label
+            ><label
+              >Request and acceptance criteria<textarea
+                name="prompt"
+                required
+                rows="4"
+                maxlength="50000"
+              ></textarea>
+            </label>
+            <fieldset>
+              <legend>Stages — executed in this order</legend>
+              <div id="stage-list"></div>
+              <button type="button" id="add-stage">Add stage</button>
+            </fieldset>
+            <p class="hint">
+              Assign a planner, implementer and reviewer as needed. Each stage
+              receives earlier outputs. Successful runs await your review; an
+              agent response is never treated as a passed audit.
+            </p>
+            <button type="submit" class="primary" id="start-task">
+              Start task
+            </button>
+          </form>
+        </details>
+        <div class="section-heading">
+          <h2>History</h2>
+          <select id="task-filter" aria-label="Filter tasks">
+            <option value="all">All activity</option>
+            <option value="task">Tasks</option>
+            <option value="chat">Chat requests</option>
+            <option value="attention">Needs attention</option>
+          </select>
+        </div>
+        <div id="task-list"></div>
+      </section>
+    </main>
+    <script nonce="{{NONCE}}" src="{{JS}}"></script>
+  </body>
+</html>

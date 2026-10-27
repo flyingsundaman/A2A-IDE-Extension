@@ -1,160 +1,140 @@
 #!/usr/bin/env node
 "use strict";
-
-const readline = require("readline");
-const path = require("path");
-const os = require("os");
-const fs = require("fs");
-const { Orchestrator } = require("../core/orchestrator");
-
-// Load config from ~/.gemini/config/a2a_config.json if available
-let userConfig = {};
-const globalConfigPath = path.join(os.homedir(), ".gemini", "config", "a2a_config.json");
-if (fs.existsSync(globalConfigPath)) {
-  try {
-    userConfig = JSON.parse(fs.readFileSync(globalConfigPath, "utf8"));
-  } catch {}
-}
-
-const orchestrator = new Orchestrator(userConfig);
-
-// Basic JSON-RPC 2.0 / MCP stdio protocol implementation
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false
+const readline = require("node:readline");
+const path = require("node:path");
+const os = require("node:os");
+const { Store } = require("../runtime/store");
+const { Mesh } = require("../runtime/mesh");
+const { exportTask } = require("../runtime/knowledge");
+const index = process.argv.indexOf("--data-dir");
+const dir =
+  index >= 0
+    ? process.argv[index + 1]
+    : path.join(os.homedir(), ".local", "share", "a2a-mesh");
+if (!dir) throw new Error("--data-dir requires a directory");
+const store = new Store(dir);
+const mesh = new Mesh(store, {
+  trusted: () => true,
+  workspaceRoot: process.cwd(),
+  getSecret: async (key) =>
+    process.env["A2A_" + key.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase()] || "",
 });
-
 const tools = [
   {
     name: "a2a_consult_agent",
-    description: "Consult a specific peer agent in the A2A Mesh (claude-code, openai-codex, or agy-pool).",
+    description:
+      "Consult a configured agent. Mutating tools require IDE approval and are denied in standalone mode.",
     inputSchema: {
       type: "object",
       properties: {
-        agent: {
-          type: "string",
-          enum: ["claude-code", "openai-codex", "agy-pool"],
-          description: "Target agent identifier"
-        },
-        prompt: { type: "string", description: "Instructions or question for the agent" },
-        code: { type: "string", description: "Optional code snippet or context" }
+        agent: { type: "string" },
+        prompt: { type: "string" },
+        code: { type: "string" },
       },
-      required: ["agent", "prompt"]
-    }
+      required: ["agent", "prompt"],
+    },
   },
   {
     name: "a2a_run_council",
-    description: "Trigger a full A2A Council debate across Claude Code (Architect) and OpenAI Codex (Security QA).",
+    description:
+      "Run configured agents sequentially. Returns actual stage results, never an automatic audit verdict.",
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string", description: "Title of the task/feature" },
-        prompt: { type: "string", description: "Task requirement and context" },
-        code: { type: "string", description: "Optional code snippet to audit and discuss" }
+        title: { type: "string" },
+        prompt: { type: "string" },
+        agents: { type: "array", items: { type: "string" } },
       },
-      required: ["title", "prompt"]
-    }
+      required: ["prompt", "agents"],
+    },
   },
   {
     name: "a2a_sync_obsidian_adr",
-    description: "Document and sync an Architectural Decision Record (ADR) into the connected Obsidian Vault.",
+    description:
+      "Export an existing task and its actual status to the configured vault.",
     inputSchema: {
       type: "object",
-      properties: {
-        title: { type: "string", description: "ADR Title" },
-        context: { type: "string", description: "Problem statement" },
-        architecture: { type: "string", description: "Architecture specification" },
-        security: { type: "string", description: "Security audit findings" },
-        patch: { type: "string", description: "Implementation summary" }
-      },
-      required: ["title", "context"]
-    }
+      properties: { taskId: { type: "string" } },
+      required: ["taskId"],
+    },
   },
   {
     name: "a2a_list_agents",
-    description: "List all active agents in the A2A Mesh and their real-time health/quota status.",
-    inputSchema: { type: "object", properties: {} }
-  }
+    description: "List configured agents without credentials.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
-
-function sendResponse(id, result) {
-  const payload = { jsonrpc: "2.0", id, result };
-  process.stdout.write(JSON.stringify(payload) + "\n");
-}
-
-function sendError(id, code, message) {
-  const payload = { jsonrpc: "2.0", id, error: { code, message } };
-  process.stdout.write(JSON.stringify(payload) + "\n");
-}
-
+const reply = (id, result, error) =>
+  process.stdout.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      ...(error ? { error } : { result }),
+    }) + "\n",
+  );
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
 rl.on("line", async (line) => {
-  if (!line.trim()) return;
+  let req;
   try {
-    const req = JSON.parse(line);
-    const { id, method, params } = req;
-
-    if (method === "initialize") {
-      return sendResponse(id, {
+    req = JSON.parse(line);
+  } catch {
+    reply(null, null, { code: -32700, message: "Invalid JSON" });
+    return;
+  }
+  if (req.id === undefined) return;
+  try {
+    if (req.method === "initialize")
+      return reply(req.id, {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "antigravity-a2a-mesh", version: "1.0.0" }
+        serverInfo: { name: "antigravity-a2a-mesh", version: "2.0.0" },
       });
-    }
-
-    if (method === "tools/list") {
-      return sendResponse(id, { tools });
-    }
-
-    if (method === "tools/call") {
-      const toolName = params.name;
-      const args = params.arguments || {};
-
-      if (toolName === "a2a_consult_agent") {
-        const result = await orchestrator.consultAgent(args.agent, args.prompt, args.code || "");
-        return sendResponse(id, {
-          content: [{ type: "text", text: result.text || JSON.stringify(result) }]
-        });
-      }
-
-      if (toolName === "a2a_run_council") {
-        const result = await orchestrator.runCouncilPipeline(args.title, args.prompt, args.code || "");
-        return sendResponse(id, {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
-        });
-      }
-
-      if (toolName === "a2a_sync_obsidian_adr") {
-        const result = orchestrator.obsidian.saveAdr({
-          taskTitle: args.title,
-          context: args.context,
-          architectureText: args.architecture,
-          securityText: args.security,
-          patchSummary: args.patch
-        });
-        return sendResponse(id, {
-          content: [{ type: "text", text: JSON.stringify(result) }]
-        });
-      }
-
-      if (toolName === "a2a_list_agents") {
-        const agents = await orchestrator.registry.refreshHealth();
-        return sendResponse(id, {
-          content: [{ type: "text", text: JSON.stringify(agents, null, 2) }]
-        });
-      }
-
-      return sendError(id, -32601, `Unknown tool: ${toolName}`);
-    }
-
-    if (method === "notifications/initialized") {
-      // Client ack
-      return;
-    }
-
-    // Default response for unhandled ping or methods
-    sendResponse(id, {});
-  } catch (err) {
-    // Malformed JSON or uncaught error
+    if (req.method === "ping") return reply(req.id, {});
+    if (req.method === "tools/list") return reply(req.id, { tools });
+    if (req.method !== "tools/call")
+      return reply(req.id, null, { code: -32601, message: "Unknown method" });
+    const { name, arguments: args = {} } = req.params || {};
+    let value;
+    if (name === "a2a_list_agents")
+      value = store.data.agents.map(
+        ({ id, name, role, model, connectionId }) => ({
+          id,
+          name,
+          role,
+          model,
+          connectionId,
+        }),
+      );
+    else if (name === "a2a_consult_agent")
+      value = await mesh.execute({
+        kind: "chat",
+        prompt: args.prompt + (args.code ? "\n\n" + args.code : ""),
+        agentIds: [args.agent],
+      });
+    else if (name === "a2a_run_council")
+      value = await mesh.execute({
+        title: args.title,
+        prompt: args.prompt,
+        agentIds: args.agents,
+      });
+    else if (name === "a2a_sync_obsidian_adr")
+      value = {
+        file: exportTask(store.data.knowledge, store.get("tasks", args.taskId)),
+      };
+    else return reply(req.id, null, { code: -32601, message: "Unknown tool" });
+    reply(req.id, {
+      content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+      ...(value?.status === "failed" ? { isError: true } : {}),
+    });
+  } catch (e) {
+    reply(req.id, {
+      isError: true,
+      content: [{ type: "text", text: e.message }],
+    });
   }
+});
+rl.on("close", () => mesh.dispose());
+process.on("SIGTERM", () => {
+  mesh.dispose();
+  rl.close();
 });

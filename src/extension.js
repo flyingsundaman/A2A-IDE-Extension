@@ -1,129 +1,89 @@
 "use strict";
-
 const vscode = require("vscode");
-const { Orchestrator } = require("./core/orchestrator");
+const { Store } = require("./runtime/store");
+const { Mesh } = require("./runtime/mesh");
 const { SquadWebviewProvider } = require("./ui/squadWebview");
-const { A2AStatusBar } = require("./ui/statusBar");
-
-/**
- * @param {vscode.ExtensionContext} context
- */
 function activate(context) {
-  const config = vscode.workspace.getConfiguration("a2a");
-  const orchestrator = new Orchestrator({
-    obsidianVaultPath: config.get("obsidianVaultPath", ""),
-    claudeCliPath: config.get("claudeCliPath", "C:\\Users\\acer\\.local\\bin\\claude.exe"),
-    codexCliPath: config.get("codexCliPath", "C:\\Users\\acer\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009\\codex.exe")
+  const store = new Store(context.globalStorageUri.fsPath);
+  const mesh = new Mesh(store, {
+    getSecret: (key) => context.secrets.get(key),
+    trusted: () => vscode.workspace.isTrusted,
+    workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "",
+    confirm: async (message) =>
+      (await vscode.window.showWarningMessage(
+        message,
+        { modal: true },
+        "Allow",
+      )) === "Allow",
   });
-
-  // Watch for configuration changes
+  const provider = new SquadWebviewProvider(context, mesh);
+  context.subscriptions.push(mesh, provider);
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("a2a")) {
-        const updated = vscode.workspace.getConfiguration("a2a");
-        orchestrator.updateConfig({
-          obsidianVaultPath: updated.get("obsidianVaultPath", "")
-        });
-      }
-    })
+    vscode.window.registerWebviewViewProvider("a2a.squadView", provider),
   );
-
-  // Status Bar
-  const statusBar = new A2AStatusBar(orchestrator);
-  context.subscriptions.push(statusBar);
-
-  // Webview Sidebar View
-  const webviewProvider = new SquadWebviewProvider(context.extensionUri, orchestrator);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("a2a.squadView", webviewProvider)
+  const register = (name, fn) =>
+    context.subscriptions.push(vscode.commands.registerCommand(name, fn));
+  register("a2a.openSquad", () =>
+    provider.open(store.data.agents.length ? "chat" : "agents"),
   );
-
-  // Command: Open Squad
-  context.subscriptions.push(
-    vscode.commands.registerCommand("a2a.openSquad", () => {
-      vscode.commands.executeCommand("workbench.view.extension.a2a-sidebar");
-    })
+  register("a2a.openAgents", () => provider.open("agents"));
+  register("a2a.runCouncil", () => provider.open("tasks"));
+  register("a2a.syncObsidian", () => provider.open("knowledge"));
+  register("a2a.refreshQuotas", async () => {
+    for (const c of store.data.connections) await mesh.testConnection(c.id);
+  });
+  async function selection(role) {
+    const agents = store.data.agents;
+    if (!agents.length) return provider.open("agents");
+    const chosen = await vscode.window.showQuickPick(
+      agents.map((a) => ({ label: a.name, description: a.role, id: a.id })),
+      { title: "Choose " + role + " agent" },
+    );
+    if (!chosen) return;
+    const prompt = await vscode.window.showInputBox({
+      prompt:
+        role === "review"
+          ? "What should be reviewed?"
+          : "What would you like to ask?",
+    });
+    if (!prompt) return;
+    provider.open("tasks");
+    const editor = vscode.window.activeTextEditor;
+    const code = editor?.document.getText(editor.selection) || "";
+    await mesh.execute({
+      title: role + " selection",
+      prompt: prompt + (code ? "\n\nSelected code:\n" + code : ""),
+      agentIds: [chosen.id],
+    });
+  }
+  register("a2a.askClaude", () => selection("consult"));
+  register("a2a.auditCodex", () => selection("review"));
+  const status = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100,
   );
-
-  // Command: Consult Claude Code
+  status.text = "A2A";
+  status.command = "a2a.openSquad";
+  status.tooltip = "Open A2A Workspace";
+  status.show();
+  context.subscriptions.push(status);
+  const update = () => {
+    const active = store.data.tasks.find((t) =>
+      ["running", "needs_input"].includes(t.status),
+    );
+    status.text = active ? "A2A: " + active.status.replaceAll("_", " ") : "A2A";
+  };
+  mesh.on("change", update);
+  context.subscriptions.push({ dispose: () => mesh.off("change", update) });
   context.subscriptions.push(
-    vscode.commands.registerCommand("a2a.askClaude", async () => {
-      const editor = vscode.window.activeTextEditor;
-      const selectedCode = editor ? editor.document.getText(editor.selection) : "";
-      const prompt = await vscode.window.showInputBox({
-        prompt: "Apa yang ingin Anda konsultasikan ke Claude Architect?",
-        placeHolder: "Misal: Rancang interface modular untuk fitur ini..."
-      });
-      if (!prompt) return;
-
-      vscode.commands.executeCommand("a2a.openSquad");
-      webviewProvider.postMessage({
-        type: "agentMessage",
-        message: { sender: "user", name: "You (Tech Lead)", role: "Human", text: `@Claude ${prompt}` }
-      });
-      await webviewProvider.handleUserMessage(`@Claude ${prompt}`);
-    })
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      mesh.workspaceRoot =
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+      provider.broadcast();
+    }),
   );
-
-  // Command: Audit with Codex
   context.subscriptions.push(
-    vscode.commands.registerCommand("a2a.auditCodex", async () => {
-      const editor = vscode.window.activeTextEditor;
-      const selectedCode = editor ? editor.document.getText(editor.selection) : "";
-      const prompt = await vscode.window.showInputBox({
-        prompt: "Fokus audit keamanan Codex:",
-        value: "Audit celah keamanan, race conditions, dan edge cases."
-      });
-      if (!prompt) return;
-
-      vscode.commands.executeCommand("a2a.openSquad");
-      webviewProvider.postMessage({
-        type: "agentMessage",
-        message: { sender: "user", name: "You (Tech Lead)", role: "Human", text: `@Codex ${prompt}` }
-      });
-      await webviewProvider.handleUserMessage(`@Codex ${prompt}`);
-    })
-  );
-
-  // Command: Run Council
-  context.subscriptions.push(
-    vscode.commands.registerCommand("a2a.runCouncil", async () => {
-      const title = await vscode.window.showInputBox({
-        prompt: "Judul Task / Fitur:",
-        placeHolder: "Misal: Implementasi Idempotent Webhook"
-      });
-      if (!title) return;
-
-      const prompt = await vscode.window.showInputBox({
-        prompt: "Deskripsi Kebutuhan:",
-        placeHolder: "Jelaskan requirements untuk didiskusikan oleh Claude & Codex..."
-      });
-      if (!prompt) return;
-
-      vscode.commands.executeCommand("a2a.openSquad");
-      await webviewProvider.handleRunCouncil(title, prompt);
-    })
-  );
-
-  // Command: Sync Obsidian
-  context.subscriptions.push(
-    vscode.commands.registerCommand("a2a.syncObsidian", async () => {
-      await webviewProvider.handleSetObsidianPath();
-    })
-  );
-
-  // Command: Refresh Quotas
-  context.subscriptions.push(
-    vscode.commands.registerCommand("a2a.refreshQuotas", async () => {
-      await webviewProvider.sendHealthStatus();
-      vscode.window.showInformationMessage("A2A Mesh: Quota dan status agen berhasil diperbarui.");
-    })
+    vscode.workspace.onDidGrantWorkspaceTrust(() => provider.broadcast()),
   );
 }
-
-function deactivate() {}
-
-module.exports = {
-  activate,
-  deactivate
-};
+module.exports = { activate, deactivate() {} };
