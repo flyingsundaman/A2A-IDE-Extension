@@ -13,10 +13,34 @@ function executable(name) {
       : [""]) {
       const file = path.resolve(dir, name + suffix);
       try {
-        fs.accessSync(file, fs.constants.X_OK);
+        fs.accessSync(file, fs.constants.F_OK);
         return file;
       } catch {}
     }
+
+  if (process.platform === "win32") {
+    if (name === "codex") {
+      const localAppData = process.env.LOCALAPPDATA;
+      if (localAppData) {
+        const codexBase = path.join(localAppData, "OpenAI", "Codex", "bin");
+        if (fs.existsSync(codexBase)) {
+          try {
+            const subdirs = fs.readdirSync(codexBase);
+            for (const sub of subdirs) {
+              const candidate = path.join(codexBase, sub, "codex.exe");
+              if (fs.existsSync(candidate)) return candidate;
+            }
+          } catch {}
+        }
+      }
+    }
+    if (name === "claude") {
+      const home = process.env.USERPROFILE || "";
+      const localClaude = path.join(home, ".local", "bin", "claude.exe");
+      if (fs.existsSync(localClaude)) return localClaude;
+    }
+  }
+
   return "";
 }
 function run(file, args, { cwd, signal, timeout = 180000, onData } = {}) {
